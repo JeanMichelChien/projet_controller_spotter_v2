@@ -4,5 +4,6 @@ jupyter
 ipykernel
 rapidfuzz
 pandas>=2.2,<3
-streamlit==1.32.2
-altair==4.2.2
+streamlit==1.55.0
+altair==6.0.0
+pillow>=11,<13
