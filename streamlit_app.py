@@ -10,6 +10,7 @@ import streamlit as st
 # App-level constants and file locations.
 APP_TITLE = "Zürich controller spotter"
 DATA_PATH = Path("data/station_events.csv")
+GITHUB_REPO_URL = "https://github.com/JeanMichelChien/projet_controller_spotter_v2"
 WEEKDAY_ORDER = [
     "Monday",
     "Tuesday",
@@ -294,6 +295,7 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
+    st.caption(f"[GitHub repository]({GITHUB_REPO_URL})")
 
     if not DATA_PATH.exists():
         st.error(

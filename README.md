@@ -3,6 +3,7 @@
 This project extracts station-level events from Telegram message history and visualizes them on a Streamlit map.
 
 Architecture diagram: [ARCHITECTURE.md](ARCHITECTURE.md)
+Live app: [Streamlit Cloud](https://projetcontrollerspotterv2-sgzgwadqsbdskdb28zmnx6.streamlit.app/)
 
 ## Data flow
 
