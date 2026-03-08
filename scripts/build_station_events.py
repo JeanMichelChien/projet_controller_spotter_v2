@@ -51,6 +51,23 @@ WEEKDAY_ORDER = [
     "Sunday",
 ]
 
+DIRECTION_MARKERS = {"richtung", "richtig"}
+DIRECTION_PREFIX_TOKEN_BLOCKLIST = {
+    "ab",
+    "am",
+    "an",
+    "bei",
+    "bis",
+    "im",
+    "in",
+    "jetzt",
+    "mit",
+    "nach",
+    "noch",
+    "und",
+    "von",
+}
+
 TRANSPORT_KEYWORDS = {
     "bahnhof",
     "billet",
@@ -229,7 +246,9 @@ def find_exact_station_match(
         return None
 
     padded_text = f" {normalized_text} "
-    best: Optional[Tuple[StationEntry, int]] = None
+    marker_match = re.search(r"\b(?:richtung|richtig)\b", normalized_text)
+    marker_index = marker_match.start() if marker_match is not None else None
+    best: Optional[Tuple[StationEntry, int, bool]] = None
 
     for entry in stations:
         phrase = f" {entry.normalized} "
@@ -238,23 +257,32 @@ def find_exact_station_match(
             continue
 
         start_index = max(found_at - 1, 0)
+        before_direction = (
+            marker_index is not None and start_index < marker_index
+        )
 
         if best is None:
-            best = (entry, start_index)
+            best = (entry, start_index, before_direction)
             continue
 
-        best_entry, best_start = best
+        best_entry, best_start, best_before_direction = best
+        if marker_index is not None and before_direction != best_before_direction:
+            if before_direction:
+                best = (entry, start_index, before_direction)
+            continue
         if entry.char_len > best_entry.char_len:
-            best = (entry, start_index)
+            best = (entry, start_index, before_direction)
             continue
         if entry.char_len == best_entry.char_len:
             if start_index < best_start:
-                best = (entry, start_index)
+                best = (entry, start_index, before_direction)
                 continue
             if start_index == best_start and entry.name < best_entry.name:
-                best = (entry, start_index)
+                best = (entry, start_index, before_direction)
 
-    return best
+    if best is None:
+        return None
+    return best[0], best[1]
 
 
 def find_fuzzy_station_match(
@@ -271,6 +299,11 @@ def find_fuzzy_station_match(
     best_station: Optional[StationEntry] = None
     best_score = -1
     best_start = 10**9
+    best_before_direction = False
+    marker_token_index = next(
+        (index for index, token in enumerate(tokens) if token in DIRECTION_MARKERS),
+        None,
+    )
 
     max_station_tokens = max(stations_by_len.keys(), default=1)
     n_max = min(len(tokens), max_station_tokens + 1)
@@ -289,7 +322,10 @@ def find_fuzzy_station_match(
             continue
 
         for start_idx in range(0, len(tokens) - n_tokens + 1):
-            window = " ".join(tokens[start_idx : start_idx + n_tokens])
+            window_tokens = tokens[start_idx : start_idx + n_tokens]
+            if any(token in DIRECTION_MARKERS for token in window_tokens):
+                continue
+            window = " ".join(window_tokens)
             # Very short windows are too noisy for fuzzy matching.
             if n_tokens == 1 and len(window) < 6:
                 continue
@@ -307,26 +343,33 @@ def find_fuzzy_station_match(
 
             matched_norm, score, _ = match
             station = station_lookup[matched_norm]
+            before_direction = (
+                marker_token_index is not None and start_idx < marker_token_index
+            )
 
             is_better = False
-            if score > best_score:
-                is_better = True
-            elif score == best_score and best_station is not None:
-                if station.char_len > best_station.char_len:
+            if marker_token_index is not None and before_direction != best_before_direction:
+                is_better = before_direction
+            else:
+                if score > best_score:
                     is_better = True
-                elif station.char_len == best_station.char_len and start_idx < best_start:
-                    is_better = True
-                elif (
-                    station.char_len == best_station.char_len
-                    and start_idx == best_start
-                    and station.name < best_station.name
-                ):
-                    is_better = True
+                elif score == best_score and best_station is not None:
+                    if station.char_len > best_station.char_len:
+                        is_better = True
+                    elif station.char_len == best_station.char_len and start_idx < best_start:
+                        is_better = True
+                    elif (
+                        station.char_len == best_station.char_len
+                        and start_idx == best_start
+                        and station.name < best_station.name
+                    ):
+                        is_better = True
 
             if is_better:
                 best_station = station
                 best_score = int(round(score))
                 best_start = start_idx
+                best_before_direction = before_direction
 
     if best_station is None:
         return None
@@ -343,7 +386,9 @@ def find_alias_station_match(
         return None
 
     padded_text = f" {normalized_text} "
-    best: Optional[Tuple[StationEntry, int, int]] = None
+    marker_match = re.search(r"\b(?:richtung|richtig)\b", normalized_text)
+    marker_index = marker_match.start() if marker_match is not None else None
+    best: Optional[Tuple[StationEntry, int, int, bool]] = None
 
     for alias_norm, station in alias_entries:
         found_at = padded_text.find(f" {alias_norm} ")
@@ -351,25 +396,84 @@ def find_alias_station_match(
             continue
 
         start_index = max(found_at - 1, 0)
+        before_direction = (
+            marker_index is not None and start_index < marker_index
+        )
         alias_len = len(alias_norm)
         if best is None:
-            best = (station, alias_len, start_index)
+            best = (station, alias_len, start_index, before_direction)
             continue
 
-        best_station, best_alias_len, best_start = best
+        best_station, best_alias_len, best_start, best_before_direction = best
+        if marker_index is not None and before_direction != best_before_direction:
+            if before_direction:
+                best = (station, alias_len, start_index, before_direction)
+            continue
         if alias_len > best_alias_len:
-            best = (station, alias_len, start_index)
+            best = (station, alias_len, start_index, before_direction)
             continue
         if alias_len == best_alias_len:
             if start_index < best_start:
-                best = (station, alias_len, start_index)
+                best = (station, alias_len, start_index, before_direction)
                 continue
             if start_index == best_start and station.name < best_station.name:
-                best = (station, alias_len, start_index)
+                best = (station, alias_len, start_index, before_direction)
 
     if best is None:
         return None
     return best[0], best[2]
+
+
+def prefix_before_direction(normalized_text: str) -> Optional[str]:
+    """Return message prefix before first direction marker token."""
+    marker = re.search(r"\b(?:richtung|richtig)\b", normalized_text)
+    if marker is None:
+        return None
+    prefix = normalized_text[: marker.start()].strip()
+    if not prefix:
+        return None
+    return prefix
+
+
+def find_direction_prefix_token_match(
+    prefix_text: str,
+    stations_by_token: Dict[str, List[StationEntry]],
+) -> Optional[StationEntry]:
+    """
+    Fallback for terse direction phrases like "... enge richtung ...".
+
+    Uses the last meaningful token before direction marker and maps it to
+    a station token index with deterministic Zurich-first tie-breaking.
+    """
+    tokens = prefix_text.split()
+    if not tokens:
+        return None
+
+    # Check from the right since the station is usually the token right before marker.
+    checked = 0
+    for token in reversed(tokens):
+        if checked >= 2:
+            break
+        checked += 1
+
+        if len(token) < 4:
+            continue
+        if token in DIRECTION_PREFIX_TOKEN_BLOCKLIST:
+            continue
+
+        candidates = stations_by_token.get(token, [])
+        if not candidates:
+            continue
+
+        def rank(entry: StationEntry) -> Tuple[int, int, int, str]:
+            entry_tokens = entry.normalized.split()
+            starts_with_zurich = 0 if (entry_tokens and entry_tokens[0] == "zurich") else 1
+            ends_with_token = 0 if (entry_tokens and entry_tokens[-1] == token) else 1
+            return (starts_with_zurich, ends_with_token, entry.char_len, entry.name)
+
+        return sorted(candidates, key=rank)[0]
+
+    return None
 
 
 def classify_event_scope(normalized_text: str) -> str:
@@ -431,8 +535,11 @@ def build_station_events(
 
     station_lookup = {entry.normalized: entry for entry in station_entries}
     stations_by_len: Dict[int, List[str]] = {}
+    stations_by_token: Dict[str, List[StationEntry]] = {}
     for entry in station_entries:
         stations_by_len.setdefault(entry.token_len, []).append(entry.normalized)
+        for token in set(entry.normalized.split()):
+            stations_by_token.setdefault(token, []).append(entry)
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     if unmatched_output_csv is not None:
@@ -481,41 +588,38 @@ def build_station_events(
                 longitude = ""
                 latitude = ""
 
-                exact = find_exact_station_match(normalized_text, station_entries)
-                if exact is not None:
-                    station, _ = exact
-                    event_scope = "transport"
-                    station_name = station.name
-                    match_status = "matched"
-                    match_method = "exact"
-                    match_score = 100
-                    longitude = station.longitude
-                    latitude = station.latitude
-                else:
-                    alias = find_alias_station_match(normalized_text, alias_entries)
-                    if alias is not None:
-                        station, _ = alias
+                direction_prefix = prefix_before_direction(normalized_text)
+                if direction_prefix is not None:
+                    prefix_exact = find_exact_station_match(direction_prefix, station_entries)
+                    if prefix_exact is not None:
+                        station, _ = prefix_exact
                         event_scope = "transport"
                         station_name = station.name
                         match_status = "matched"
-                        match_method = "alias"
+                        match_method = "exact"
                         match_score = 100
                         longitude = station.longitude
                         latitude = station.latitude
                     else:
-                        event_scope = classify_event_scope(normalized_text)
-                        if event_scope == "non_transport":
-                            match_method = "non_transport"
-                            non_transport += 1
+                        prefix_alias = find_alias_station_match(direction_prefix, alias_entries)
+                        if prefix_alias is not None:
+                            station, _ = prefix_alias
+                            event_scope = "transport"
+                            station_name = station.name
+                            match_status = "matched"
+                            match_method = "alias"
+                            match_score = 100
+                            longitude = station.longitude
+                            latitude = station.latitude
                         else:
-                            fuzzy = find_fuzzy_station_match(
-                                normalized_text,
+                            prefix_fuzzy = find_fuzzy_station_match(
+                                direction_prefix,
                                 stations_by_len,
                                 station_lookup,
                                 score_cutoff=fuzzy_score_cutoff,
                             )
-                            if fuzzy is not None:
-                                station, score = fuzzy
+                            if prefix_fuzzy is not None:
+                                station, score = prefix_fuzzy
                                 event_scope = "transport"
                                 station_name = station.name
                                 match_status = "matched"
@@ -523,6 +627,64 @@ def build_station_events(
                                 match_score = score
                                 longitude = station.longitude
                                 latitude = station.latitude
+                            else:
+                                prefix_token_station = find_direction_prefix_token_match(
+                                    direction_prefix,
+                                    stations_by_token,
+                                )
+                                if prefix_token_station is not None:
+                                    station = prefix_token_station
+                                    event_scope = "transport"
+                                    station_name = station.name
+                                    match_status = "matched"
+                                    match_method = "direction_token"
+                                    match_score = 100
+                                    longitude = station.longitude
+                                    latitude = station.latitude
+
+                if match_status != "matched":
+                    exact = find_exact_station_match(normalized_text, station_entries)
+                    if exact is not None:
+                        station, _ = exact
+                        event_scope = "transport"
+                        station_name = station.name
+                        match_status = "matched"
+                        match_method = "exact"
+                        match_score = 100
+                        longitude = station.longitude
+                        latitude = station.latitude
+                    else:
+                        alias = find_alias_station_match(normalized_text, alias_entries)
+                        if alias is not None:
+                            station, _ = alias
+                            event_scope = "transport"
+                            station_name = station.name
+                            match_status = "matched"
+                            match_method = "alias"
+                            match_score = 100
+                            longitude = station.longitude
+                            latitude = station.latitude
+                        else:
+                            event_scope = classify_event_scope(normalized_text)
+                            if event_scope == "non_transport":
+                                match_method = "non_transport"
+                                non_transport += 1
+                            else:
+                                fuzzy = find_fuzzy_station_match(
+                                    normalized_text,
+                                    stations_by_len,
+                                    station_lookup,
+                                    score_cutoff=fuzzy_score_cutoff,
+                                )
+                                if fuzzy is not None:
+                                    station, score = fuzzy
+                                    event_scope = "transport"
+                                    station_name = station.name
+                                    match_status = "matched"
+                                    match_method = "fuzzy"
+                                    match_score = score
+                                    longitude = station.longitude
+                                    latitude = station.latitude
 
                 if match_status == "matched":
                     matched += 1
