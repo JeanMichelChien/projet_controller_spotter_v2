@@ -1,0 +1,9 @@
+.venv/
+.env
+.telegram_sessions/
+*.session
+exports/*.jsonl
+exports/unmatched_messages.csv
+__pycache__/
+.ipynb_checkpoints/
+.DS_Store
