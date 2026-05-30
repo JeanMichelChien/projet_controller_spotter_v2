@@ -7,3 +7,24 @@ exports/unmatched_messages.csv
 __pycache__/
 .ipynb_checkpoints/
 .DS_Store
+
+# Local secrets and environment
+.env.*
+!.env.example
+
+# OS, editor, and IDE metadata
+.vscode/
+.idea/
+
+# Python/runtime artifacts
+*.py[cod]
+.pytest_cache/
+.venv*/
+venv/
+.deps/
+
+# Logs, local outputs, and notebooks
+*.log
+artifacts/
+playwright-report/
+test-results/
